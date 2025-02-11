@@ -17,7 +17,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 # Load environment variables
-load_dotenv(dotenv_path='/teamspace/studios/this_studio/env.txt')
+load_dotenv()
 
 # Initialize LLMs
 llm_groq = ChatGroq(model='llama3-70b-8192')
