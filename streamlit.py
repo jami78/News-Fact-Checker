@@ -2,8 +2,6 @@ import streamlit as st
 from dotenv import load_dotenv
 from langchain.agents import initialize_agent, AgentType
 from langchain.tools import Tool
-from langchain.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain.tools import DuckDuckGoSearchRun, TavilySearchResults
 from langchain_community.utilities import GoogleSerperAPIWrapper
@@ -13,14 +11,22 @@ from langchain.schema import SystemMessage
 from langchain.document_loaders import UnstructuredURLLoader
 from datetime import datetime
 import textwrap
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 import google.auth
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import google.generativeai as genai
 import os
 import re
+from docx import Document
+from docx2pdf import convert 
+from docx.shared import Inches
+from xhtml2pdf import pisa  
+import pypandoc
+import docx.enum.style
+from googleapiclient.http import MediaFileUpload
+import traceback
+
+
 load_dotenv(dotenv_path= '/teamspace/studios/this_studio/env.txt')
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  
 
@@ -92,30 +98,82 @@ The following sources were used to verify the claim:
     full_report = report_header + claim_section + fact_check_section + sources_section
     return full_report
 
-# Function to save the report as a PDF
-def save_report_as_pdf(formatted_report, filename="fact_check_report.pdf"):
-    c = canvas.Canvas(filename, pagesize=letter)
-    width, height = letter
-    c.setFont("Helvetica", 10)
-    y_position = height - 40
-    for line in formatted_report.split("\n"):
-        if y_position < 40:
-            c.showPage()
-            c.setFont("Helvetica", 10)
-            y_position = height - 40
-        c.drawString(50, y_position, line.strip())
-        y_position -= 15
-    c.save()
-    return filename
 
-# Load credentials
+def markdown_to_docx(markdown_content,filename= 'fact_check_report.docx'):  
+    # Create a new Document
+    doc = Document()
+
+    # Add styles for list bullet (Conditionally)
+    styles = doc.styles
+    if 'List Bullet' not in styles:
+        styles.add_style('List Bullet', docx.enum.style.WD_STYLE_TYPE.PARAGRAPH)
+
+    # Split the markdown content into lines
+    lines = markdown_content.split('\n')
+
+    # Iterate through each line and add it to the document
+    for line in lines:
+        if line.startswith("# "):  # Header level 1
+            doc.add_heading(line[2:], level=1)
+        elif line.startswith("## "):  # Header level 2
+            doc.add_heading(line[3:], level=2)
+        elif "**" in line: # Bold text
+            para = doc.add_paragraph()
+            # Split line into list of strings
+            split_text = line.split("**")
+            # Enumerate the list
+            for i, text in enumerate(split_text):
+                # If even, text is not bold, if odd it is bold
+                run = para.add_run(text)
+                if (i%2) != 0:
+                    run.bold = True
+
+        elif line.startswith("- "):  # List item
+            para = doc.add_paragraph(line[2:], style='List Bullet')  # style applies to paragraph, not run
+
+        else:
+            doc.add_paragraph(line)  # Normal text
+
+    # Save the document
+    try:
+        doc.save(filename)
+        return filename
+    except Exception as e:
+        print(f"Error saving docx file: {e}")
+        return None
+
+
+
+# Convert DOCX to PDF
+def convert_docx_to_pdf(docx_filepath, pdf_filepath):
+    try:
+        # Convert docx to html
+        output = pypandoc.convert_file(docx_filepath, 'html', outputfile="output.html")
+        assert output == ""
+
+        # Convert html to pdf
+        with open("output.html", "r") as f:
+            html = f.read()
+
+        # Convert the HTML to PDF
+        with open(pdf_filepath, "wb") as f:
+            pisa_status = pisa.CreatePDF(html, dest=f)
+
+        # Remove temporary html report
+        os.remove("output.html")
+
+        return pdf_filepath
+    except Exception as e:
+        print(f"Error converting docx to pdf: {e}")
+        return None
+
+# Load Google Drive credentials
+
+# Load Google Drive credentials
 def get_google_services():
-    creds = service_account.Credentials.from_service_account_file(
-        "/teamspace/studios/this_studio/fact-checker-450613-deb87d989f62.json",
-        scopes=["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive.file"]
-    )
+    creds = service_account.Credentials.from_service_account_file("/teamspace/studios/this_studio/fact-checker-450613-deb87d989f62.json", scopes=["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive.file"])
     docs_service = build("docs", "v1", credentials=creds)
-    drive_service = build("drive", "v3", credentials=creds)  # Drive API
+    drive_service = build("drive", "v3", credentials=creds) # Drive API
     return docs_service, drive_service
 
 # Extract Folder ID from full Google Drive folder link
@@ -123,38 +181,47 @@ def extract_folder_id(drive_link):
     match = re.search(r"drive\.google\.com/drive/folders/([a-zA-Z0-9_-]+)", drive_link)
     return match.group(1) if match else None
 
-# Create and write to a Google Doc
-def create_google_doc(report_text):
-    docs_service, drive_service = get_google_services()
+def upload_docx_to_drive(docx_filepath, drive_link):
+    """Uploads the DOCX file to Google Drive and returns a shareable link."""
+    try:
+        docs_service, drive_service = get_google_services()
 
-    # Create a new document
-    doc = docs_service.documents().create(body={"title": "Fact-Check Report"}).execute()
-    doc_id = doc["documentId"]
+        # Extract Folder ID
+        folder_id = extract_folder_id(drive_link)
+        if not folder_id:
+            print("Error: Invalid Google Drive folder link.")
+            return None
 
-    # Write content
-    requests = [{"insertText": {"location": {"index": 1}, "text": report_text}}]
-    docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
+        # File metadata
+        file_metadata = {
+            "name": os.path.basename(docx_filepath),
+            "parents": [folder_id]
+        }
 
-    return doc_id
+        # Media upload
+        media = MediaFileUpload(docx_filepath, mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
-# Upload the doc to the shared folder
-def move_doc_to_folder(doc_id, drive_link):
-    _, drive_service = get_google_services()
+        # Upload the file
+        try:
+            file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+        except Exception as upload_error:
+            print(f"Error during file upload: {upload_error}")
+            print(traceback.format_exc())  # Print the full traceback
+            return None
 
-    # Extract Folder ID
-    folder_id = extract_folder_id(drive_link)
-    if not folder_id:
-        return "Invalid Google Drive folder link."
+        # Get the file ID and webViewLink
+        file_id = file.get('id')
+        file_url = file.get('webViewLink')
 
-    # Move the document to the shared folder
-    file_metadata = {"parents": [folder_id]}
-    drive_service.files().update(fileId=doc_id, addParents=folder_id, removeParents="root", fields="id, parents").execute()
+        return file_url
 
-    return f"https://docs.google.com/document/d/{doc_id}"
+    except Exception as e:
+        print(f"Error uploading DOCX to Google Drive: {e}")
+        print(traceback.format_exc())  # Print the full traceback
+        return None
 
 # ✅ User provides the full Google Drive folder link
-drive_folder_link = "https://drive.google.com/drive/folders/1kPc5b41KpJur_pTKLXGLlCB2IjD5-eC2?dmr=1&ec=wgc-drive-hero-goto"  
-
+drive_folder_link = "https://drive.google.com/drive/folders/1kPc5b41KpJur_pTKLXGLlCB2IjD5-eC2?dmr=1&ec=wgc-drive-hero-goto"
 
 # Streamlit interface
 st.title("📰 Fact-Checking Tool")
@@ -207,34 +274,41 @@ if st.button("Fact-Check"):
 
             # Step 5: Generate report
             formatted_report = generate_report(fact_check_report, fact_check_data.urls)
+      
             # Display report
             st.subheader("Fact-Check Report")
             st.write(formatted_report)
 
-            # Step 6: User selects PDF or Google Doc
             st.subheader("Download Report")
 
             # PDF Download Button
-            pdf_filename = save_report_as_pdf(formatted_report)
-            with open(pdf_filename, "rb") as pdf_file:
-                st.download_button(
-                    label="📄 Download Report as PDF",
-                    data=pdf_file,
-                    file_name=pdf_filename,
-                    mime="application/pdf"
-                )
+            docx_filename = "fact_check_report.docx" # You must specify
+            docx_file = markdown_to_docx(formatted_report, docx_filename)
 
-            # Google Docs Upload & Open Button
-            doc_id = create_google_doc(formatted_report)  # Create Google Doc
-            google_doc_url = move_doc_to_folder(doc_id, drive_folder_link)  # Move to a folder
+            pdf_filename = "fact_check_report.pdf"
+            pdf_file = convert_docx_to_pdf(docx_file, pdf_filename) # pdf_file will have the filename as before.
 
-            # Button to open the Google Doc
-            st.markdown(
-                f'<a href="{google_doc_url}" target="_blank">'
-                f'<button style="padding:10px 15px; background-color:#008CBA; color:white; border:none; border-radius:5px; cursor:pointer; width:100%;">'
-                f'📄 Open Report in Google Docs</button></a>',
-                unsafe_allow_html=True
-            )
+            if pdf_file:
+                try:
+                    with open(pdf_file, "rb") as file: # Open the actual pdf file
+                        pdf_bytes = file.read()
+                    st.download_button(
+                        label="📄 Download Report as PDF",
+                        data=pdf_bytes, # This must be the pdf bytes, not the docx
+                        file_name=pdf_filename,
+                        mime="application/pdf"
+                    )
+                except Exception as e:
+                    st.error(f"Error reading PDF file: {e}")
+            else:
+                st.error("Failed to convert DOCX to PDF.")
+
+            google_doc_url = upload_docx_to_drive(docx_file, drive_folder_link)
+
+            if google_doc_url:
+             # Button to open the Google Doc
+             st.write("Access as google doc:", google_doc_url)
+
         except Exception as e:
             st.error(f"An error occurred: {e}")
             st.write("Raw response from the agent:", formatted_report)
