@@ -17,7 +17,7 @@ from datetime import datetime
 from doc_to_pdf import convert_docx_to_pdf
 from doc_to_pdf import markdown_to_docx
 from drive_upload import upload_docx_to_drive
-load_dotenv(dotenv_path= '/teamspace/studios/this_studio/env.txt')
+load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  
 
 GROQ= os.getenv("GROQ_API_KEY")
