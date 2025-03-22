@@ -6,18 +6,16 @@ from googleapiclient.http import MediaFileUpload
 import traceback
 
 def get_google_services():
-    creds = service_account.Credentials.from_service_account_file("/teamspace/studios/this_studio/fact-checker-450613-deb87d989f62.json", scopes=["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive.file"])
+    creds = service_account.Credentials.from_service_account_file("fact-checker-450613-deb87d989f62.json", scopes=["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive.file"])
     docs_service = build("docs", "v1", credentials=creds)
     drive_service = build("drive", "v3", credentials=creds) # Drive API
     return docs_service, drive_service
 
-# Extract Folder ID from full Google Drive folder link
 def extract_folder_id(drive_link):
     match = re.search(r"drive\.google\.com/drive/folders/([a-zA-Z0-9_-]+)", drive_link)
     return match.group(1) if match else None
 
 def upload_docx_to_drive(docx_filepath, drive_link):
-    """Uploads the DOCX file to Google Drive and returns a shareable link."""
     try:
         docs_service, drive_service = get_google_services()
 
@@ -54,3 +52,4 @@ def upload_docx_to_drive(docx_filepath, drive_link):
         print(f"Error uploading DOCX to Google Drive: {e}")
         print(traceback.format_exc())  # Print the full traceback
         return None
+    
