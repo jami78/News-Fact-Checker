@@ -2,7 +2,7 @@
 # **News Fact-Checker API**
 This project is a **Fact-Checking System** that verifies the credibility of a given claim against reliable online sources. It utilizes **LLMs from Groq and Gemini**, along with **Google Drive API for document storage**.
 
----
+```
 ## **🏗️ Structure**
 
 
@@ -90,7 +90,7 @@ This project is a **Fact-Checking System** that verifies the credibility of a gi
 ├── requirements.txt
 └── Workflow.png
 
----
+```
 
 ## **🚀 Features**
 ✅ **AI-Powered Fact-Checking**: Uses the advanced **GPT-4o**
