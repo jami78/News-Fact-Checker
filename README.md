@@ -1,5 +1,5 @@
 
-# **News Fact-Checker API**
+# **News Fact-Checker**
 This project is a **Fact-Checking System** that verifies the credibility of a given claim against reliable online sources. It utilizes **GPT-4o**, along with **Google Drive API for document storage**.
 
 
